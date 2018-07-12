@@ -1,0 +1,16 @@
+parsepbf.py
+===========
+
+Version History
+
+Version 1.1 First release. Parse .pbf file into lists of Nodes, Ways & 
+		Relations, optionally output XML based on the lists
+		
+Version 1.2 Change XML output to not store the data in lists. This
+		allows parsing to XML of much bigger files than can be held in 
+		memory. 
+
+Version 1.3 Improve the XML escaping.
+
+Version 2.0 - by Exatel, edited to work with Python3, have a bit nicer API and
+              support callbacks
