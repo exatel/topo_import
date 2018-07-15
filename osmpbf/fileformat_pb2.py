@@ -116,12 +116,12 @@ _BLOBHEADER = descriptor.Descriptor(
 
 class Blob(message.Message, metaclass=reflection.GeneratedProtocolMessageType):
   DESCRIPTOR = _BLOB
-  
+
   # @@protoc_insertion_point(class_scope:OSMPBF.Blob)
 
 class BlobHeader(message.Message, metaclass=reflection.GeneratedProtocolMessageType):
   DESCRIPTOR = _BLOBHEADER
-  
+
   # @@protoc_insertion_point(class_scope:OSMPBF.BlobHeader)
 
 # @@protoc_insertion_point(module_scope)

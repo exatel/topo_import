@@ -695,62 +695,62 @@ _RELATION_MEMBERTYPE.containing_type = _RELATION;
 
 class HeaderBlock(message.Message, metaclass=reflection.GeneratedProtocolMessageType):
   DESCRIPTOR = _HEADERBLOCK
-  
+
   # @@protoc_insertion_point(class_scope:OSMPBF.HeaderBlock)
 
 class HeaderBBox(message.Message, metaclass=reflection.GeneratedProtocolMessageType):
   DESCRIPTOR = _HEADERBBOX
-  
+
   # @@protoc_insertion_point(class_scope:OSMPBF.HeaderBBox)
 
 class PrimitiveBlock(message.Message, metaclass=reflection.GeneratedProtocolMessageType):
   DESCRIPTOR = _PRIMITIVEBLOCK
-  
+
   # @@protoc_insertion_point(class_scope:OSMPBF.PrimitiveBlock)
 
 class PrimitiveGroup(message.Message, metaclass=reflection.GeneratedProtocolMessageType):
   DESCRIPTOR = _PRIMITIVEGROUP
-  
+
   # @@protoc_insertion_point(class_scope:OSMPBF.PrimitiveGroup)
 
 class StringTable(message.Message, metaclass=reflection.GeneratedProtocolMessageType):
   DESCRIPTOR = _STRINGTABLE
-  
+
   # @@protoc_insertion_point(class_scope:OSMPBF.StringTable)
 
 class Info(message.Message, metaclass=reflection.GeneratedProtocolMessageType):
   DESCRIPTOR = _INFO
-  
+
   # @@protoc_insertion_point(class_scope:OSMPBF.Info)
 
 class DenseInfo(message.Message, metaclass=reflection.GeneratedProtocolMessageType):
   DESCRIPTOR = _DENSEINFO
-  
+
   # @@protoc_insertion_point(class_scope:OSMPBF.DenseInfo)
 
 class ChangeSet(message.Message, metaclass=reflection.GeneratedProtocolMessageType):
   DESCRIPTOR = _CHANGESET
-  
+
   # @@protoc_insertion_point(class_scope:OSMPBF.ChangeSet)
 
 class Node(message.Message, metaclass=reflection.GeneratedProtocolMessageType):
   DESCRIPTOR = _NODE
-  
+
   # @@protoc_insertion_point(class_scope:OSMPBF.Node)
 
 class DenseNodes(message.Message, metaclass=reflection.GeneratedProtocolMessageType):
   DESCRIPTOR = _DENSENODES
-  
+
   # @@protoc_insertion_point(class_scope:OSMPBF.DenseNodes)
 
 class Way(message.Message, metaclass=reflection.GeneratedProtocolMessageType):
   DESCRIPTOR = _WAY
-  
+
   # @@protoc_insertion_point(class_scope:OSMPBF.Way)
 
 class Relation(message.Message, metaclass=reflection.GeneratedProtocolMessageType):
   DESCRIPTOR = _RELATION
-  
+
   # @@protoc_insertion_point(class_scope:OSMPBF.Relation)
 
 # @@protoc_insertion_point(module_scope)
