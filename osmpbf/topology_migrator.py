@@ -3,8 +3,6 @@
 Author: Tomasz Fortuna <bla@thera.be>
 License: GPLv3
 """
-import threading
-from time import time
 import enum
 import shapely.geometry
 import shapely.wkt
@@ -50,13 +48,6 @@ class WayMapping(enum.Enum):
     #cycleway = 2100
     #footway = 2100
 
-class DataPusher(threading.Thread):
-    """
-    Split IO bound problem into 2 cores.
-    """
-    def __init__(self, conn):
-        self.ways_buffer = []
-
 
 class TopologyMigrator:
     """
@@ -93,6 +84,9 @@ class TopologyMigrator:
         self.nodes_buffer = []
 
     def create_db(self):
+        """
+        Create topology model
+        """
         script = """
         DROP TABLE IF EXISTS r_nodes;
         DROP TABLE IF EXISTS r_ways;
@@ -149,7 +143,7 @@ class TopologyMigrator:
 
         highway = highway.decode('ascii')
         try:
-            WayMapping[highway]
+            _ = WayMapping[highway]
             return False
         except KeyError:
             self.ways_ignored += 1
@@ -242,7 +236,7 @@ class TopologyMigrator:
         """
         Flush buffers into the DB
 
-        TODO COPY is faster. Yet executemany seems to do the trick.
+        TODO: COPY would be faster. Yet executemany seems to do the trick.
         """
         if self.ways_buffer:
             sql = ("INSERT INTO r_ways (id, id_osm, type,  source, target, "
@@ -297,6 +291,5 @@ class TopologyMigrator:
             sql = "UPDATE r_ways SET length=ST_Length(geom::geography)"
             cursor.execute(sql)
         self.conn.commit()
-
 
         self.index_db()
