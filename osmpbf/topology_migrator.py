@@ -48,6 +48,20 @@ class WayMapping(enum.Enum):
     #cycleway = 2100
     #footway = 2100
 
+def m2deg(meters):
+    """
+    Convert length in meters to degrees in a simplified way, linearized around
+    center of Poland: ~ latitude 52.0393, longitude 19.4866.
+
+    0.0001° = 11.11949266456835m (latitudinal) -> 111194.92664568349m
+    0.0001° =  6.83982215626177m (longitudinal) -> 68398.22156261769m
+    0.0001° + 0.0001° = 0.0001414213562373095m = perpendicular = 13.054737m -> 92310.9306m
+
+    Average: 90634.692934m
+    """
+    meters_per_degree = 90634.692934
+    return meters / meters_per_degree
+
 
 class TopologyMigrator:
     """
@@ -162,13 +176,19 @@ class TopologyMigrator:
             return
         self.ways_found += 1
 
-        # Mark intersection nodes
+        # Mark all nodes and intersections for aggregating data
+        for node_id in way.nodes:
+            # If the node was already marked - it is an intersection.
+            if node_id in self.way_nodes:
+                self.way_intersections.add(node_id)
+
+            # Mark as used.
+            self.way_nodes[node_id] = None
+
+        # Always mark beginning/end as intersection nodes
         self.way_intersections.add(way.nodes[0])
         self.way_intersections.add(way.nodes[-1])
 
-        # Mark all nodes and intersections for aggregating data
-        for node_id in way.nodes:
-            self.way_nodes[node_id] = None
 
     def node_cb(self, node):
         """
@@ -182,6 +202,9 @@ class TopologyMigrator:
     def way_cb(self, way):
         """
         Way-callback used in second pass to split and migrate ways.
+
+        We split ways on intersections and then artificially split ways if they
+        are too long.
         """
         if self.filter_way(way):
             return
@@ -192,13 +215,15 @@ class TopologyMigrator:
 
         name = way.tags.get(b'name', b'').decode('utf-8')
 
-        # Single way should be split if there's intersection if another route
-        # in the middle.
+        # Single way should be split if there's an intersection with another
+        # route in the middle - T-shaped.
 
+        # List of split ways created from input way.
+        # Single node is always shared between split ways
         # [[node_id1, node_id2, ..., node_idX], [node_idX, node_idX+1, ...]]
-        # One node is always shared between ways)
         split_ways = []
 
+        # 1) Built ways and split them on intersections.
         cur_way = [way.nodes[0]]
         for node_id in way.nodes[1:]:
             if node_id in self.way_intersections:
@@ -210,6 +235,10 @@ class TopologyMigrator:
                 # Just aggregate - no intersection here.
                 cur_way.append(node_id)
 
+        # 2) Split too long split_ways even further.
+
+
+        # 3) Store ways in DB
         for i, nodes in enumerate(split_ways):
             geom = [self.way_nodes[node_id] for node_id in nodes]
             line_string = shapely.geometry.LineString(geom)
