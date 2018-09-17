@@ -15,8 +15,6 @@ import psycopg2.extras
 from osmpbf import PBFParser
 from osmpbf import TopologyMigrator
 
-from IPython import embed
-
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--pbf", required=True, help="pbf file to import")
@@ -33,6 +31,11 @@ def parse_args():
     # TODO: Use file or ask instead
     p.add_argument("--password", required=True,
                    help="database connection password (WARN: will be listed in process list)")
+
+    p.add_argument("--max-meters", default=None,
+                   required=False,
+                   type=int,
+                   help="split ways exceeding X meters")
 
     args = p.parse_args()
 
@@ -63,8 +66,9 @@ def main():
 
     conn = connect(args)
     # 1) First pass - migrate ways and a aggregate node ids
-    migrator = TopologyMigrator(conn)
+    migrator = TopologyMigrator(conn, args.max_meters)
 
+    print("Create an empty scheme")
     migrator.create_db()
 
     print()

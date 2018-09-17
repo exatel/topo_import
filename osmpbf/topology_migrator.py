@@ -4,9 +4,13 @@ Author: Tomasz Fortuna <bla@thera.be>
 License: GPLv3
 """
 import enum
+import math
 import shapely.geometry
 import shapely.wkt
 import shapely.wkb
+# DEBUG TODO REMOVE
+import geojson
+from .parsepbf import Node
 
 class WayMapping(enum.Enum):
     """
@@ -62,6 +66,10 @@ def m2deg(meters):
     meters_per_degree = 90634.692934
     return meters / meters_per_degree
 
+def deg2m(degrees):
+    """Inverse of m2deg"""
+    meters_per_degree = 90634.692934
+    return degrees * meters_per_degree
 
 class TopologyMigrator:
     """
@@ -81,7 +89,7 @@ class TopologyMigrator:
     """
     CHUNK_SIZE=1000
 
-    def __init__(self, conn):
+    def __init__(self, conn, max_meters=None):
         self.conn = conn
         # Points within routable graph.
         # Step 1: aggregate ids, and info if are intersection nodes or not.
@@ -96,6 +104,8 @@ class TopologyMigrator:
 
         self.ways_buffer = []
         self.nodes_buffer = []
+
+        self.max_meters = max_meters
 
     def create_db(self):
         """
@@ -199,6 +209,147 @@ class TopologyMigrator:
         if node.node_id in self.way_nodes:
             self.way_nodes[node.node_id] = (node.lon, node.lat)
 
+    def split_long(self, node_lst, max_meters=25):
+        """
+        Split way (represented by list of nodes) until no chunk exceeds given
+        length.
+
+        All coordinates are in lon/lat order.
+        """
+        # Current length in degrees.
+        length = 0
+        # Generated split ways.
+        split_ways = []
+        # Currently aggregated points
+        current_way = []
+        # Last added point for measuring distance.
+        node_prev = None
+        node_cur = None
+
+        max_degrees = m2deg(max_meters)
+
+        for node_cur_id in node_lst:
+            node_cur = self.way_nodes[node_cur_id]
+            #print("  node_id {} current: {} prev: {}".format(node_cur_id,
+            # node_cur, node_prev))
+
+            # Special case: first node
+            if node_prev is None:
+                current_way.append(node_cur_id)
+                node_prev = node_cur
+                continue
+
+            # taxi metric - not good for vector calculations
+            distance = math.sqrt((node_prev[0] - node_cur[0])**2 +
+                                 (node_prev[1] - node_cur[1])**2)
+
+            #print("  len: {:.2f} distance: {:.2f}".format(deg2m(length),
+            # deg2m(distance)))
+
+            if length + distance > max_degrees:
+                # Chunk length overflow.
+
+                # Optimization: try to stick to existing nodes.
+                if len(current_way) >= 2 and distance <= max_degrees:
+                    # Split way on this node.
+                    """
+                    Case 1:
+                        l1        l2
+                    P1 ---- P2 ---------- P3
+                    l1 < max_degrees,
+                    l2 < max_degrees,
+                    l1+l2 > max_degrees
+
+                    Result, two ways:
+                    P1 ---- P2   P2 ---------- P3
+                    """
+                    split_ways.append(current_way)
+                    current_way = current_way[-1:]
+                    current_way.append(node_cur_id)
+                    length = distance
+                    node_prev = node_cur
+                    #print("  len overflow: broke optimistically: {}".format(split_ways[-1]))
+                else:
+                    """
+                    Case 1:
+                        l1                    l2
+                    P1 ---- P2 -------------------------------- P3
+                    l1 < max_degrees, but l1+l2 > max_degrees
+                    Result, two ways:
+                    P1 ---- P2 ------------- Art1  Art1 ------------------- P3
+
+                    Case 2:            l1
+                    P1 ------------------------------------- P2
+                    with l1>max_degrees
+
+                    Result:
+                    P1 ---- Art1  Art1 ---- Art2  Art2 ----- P2
+
+                    """
+                    #print("  len overflow: art point needed")
+
+                    # TODO: Factor out  as a func.
+                    # TODO: implement Node as a class with math.
+                    # Artificial node required.
+                    # Construct a direction vector
+                    vector = node_cur[0] - node_prev[0], node_cur[1] - node_prev[1]
+                    # normalize vector length to 1.
+                    vector = [x / distance for x in vector]
+                    # We need one, or more artificial points.
+                    times = int((length + distance) / max_degrees)
+                    #print("  splitting {} times".format(times))
+
+                    for i in range(0, times):
+                        # Create node, as far as possible
+                        # node_new = node_cur + vector * max_degrees
+                        node_new = tuple(
+                            prev + v * max_degrees * i
+                            for prev, v in zip(node_prev, vector)
+                        )
+                        art_id = node_cur_id * 10000 + i
+                        #print("  new_node: {} -> {}".format(art_id, node_new))
+                        self.way_nodes[art_id] = node_new
+
+                        # Finish current_way, and start new one.
+                        current_way.append(art_id)
+                        split_ways.append(current_way)
+
+                        # Start new one from the artificial point
+                        current_way = current_way[-1:]
+                        length = 0
+                        #print("    art point added, split {}".format(split_ways[-1]))
+
+                    # Finally - add the last point which caused all the fus.
+                    current_way.append(node_cur_id)
+                    node_prev = node_cur
+
+
+        # Last one
+        if len(current_way) > 1:
+            split_ways.append(current_way)
+
+        # DEBUG
+        """
+        coords = shapely.geometry.LineString(
+            self.way_nodes[nid]
+            for nid in node_lst
+        )
+        print()
+        print()
+        print()
+        print(geojson.dumps(coords))
+
+        collection = shapely.geometry.collection.GeometryCollection([
+            shapely.geometry.LineString(
+                self.way_nodes[nid]
+                for nid in way
+            )
+            for way in split_ways
+        ])
+        print("  ", geojson.dumps(collection))
+        """
+        return split_ways
+
     def way_cb(self, way):
         """
         Way-callback used in second pass to split and migrate ways.
@@ -236,10 +387,15 @@ class TopologyMigrator:
                 cur_way.append(node_id)
 
         # 2) Split too long split_ways even further.
-
-
+        if self.max_meters is not None:
+            short_ways = []
+            for split_way in split_ways:
+                short_ways += self.split_long(split_way,
+                                              max_meters=self.max_meters)
+        else:
+            short_ways = split_ways
         # 3) Store ways in DB
-        for i, nodes in enumerate(split_ways):
+        for i, nodes in enumerate(short_ways):
             geom = [self.way_nodes[node_id] for node_id in nodes]
             line_string = shapely.geometry.LineString(geom)
             cur_id = way.way_id * 10000 + i
