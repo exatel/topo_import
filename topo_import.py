@@ -49,6 +49,7 @@ def connect(args):
     print("Connect to database")
     conn = psycopg2.connect(host=args.host,
                             dbname=args.db,
+                            port=args.port,
                             user=args.username,
                             password=args.password,
                             cursor_factory=psycopg2.extras.NamedTupleCursor)
@@ -74,7 +75,8 @@ def main():
     print()
     print("1st-pass: Aggregate node ids of intersections and parts of ways:")
     with open(args.pbf, "rb") as fpbf:
-        # create the parser object
+        # While going through ways (way_callback) call node_optimisation_cb
+        # function to gather node ids and intersections required later.
         p = PBFParser(fpbf,
                       way_callback=migrator.node_optimisation_cb)
 
@@ -85,7 +87,12 @@ def main():
     print()
     print("2nd-pass: Gather node coordinates and import ways:")
     with open(args.pbf, "rb") as fpbf:
-        # create the parser object
+        # node_callback will simply aggregate latitude and longitude
+        # of previously marked nodes in RAM.
+
+        # way_callback aggregates way data with all the geometry and stores in
+        # the DB as it reads them. It holds most logic as it can split imported
+        # ways into smaller parts.
         p = PBFParser(fpbf,
                       node_callback=migrator.node_cb,
                       way_callback=migrator.way_cb)
