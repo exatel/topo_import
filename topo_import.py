@@ -56,7 +56,6 @@ def connect(args):
 
     return conn
 
-
 def main():
     # the main part of the program starts here
     # extract the command line options

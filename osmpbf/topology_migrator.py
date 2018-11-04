@@ -226,11 +226,11 @@ class TopologyMigrator:
                 cur_way.append(node_id)
 
         # 2) Split too long split_ways even further.
+
         if self.way_splitter is not None:
             short_ways = []
             for split_way in split_ways:
                 short_ways += self.way_splitter.split(split_way)
-
         else:
             short_ways = split_ways
 

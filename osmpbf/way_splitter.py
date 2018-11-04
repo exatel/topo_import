@@ -1,8 +1,5 @@
 import math
 
-# DEBUG TODO REMOVE
-import geojson
-
 def m2deg(meters):
     """
     Convert length in meters to degrees in a simplified way, linearized around
@@ -51,8 +48,6 @@ class WaySplitter:
         for node_cur_id in node_lst:
             node_prev = node_cur
             node_cur = self.way_nodes[node_cur_id]
-            #print("  node_id {} current: {} prev: {}".format(node_cur_id,
-            # node_cur, node_prev))
 
             # Special case: first node
             if node_prev is None:
@@ -64,22 +59,19 @@ class WaySplitter:
             distance = math.sqrt((node_prev[0] - node_cur[0])**2 +
                                  (node_prev[1] - node_cur[1])**2)
 
-            #print("  len: {:.2f} distance: {:.2f}".format(deg2m(length),
-            # deg2m(distance)))
-
             if length + distance <= self.max_degrees:
-                # No length overflow: just add to current way.
+                # No length overflow: just add to the current way.
                 current_way.append(node_cur_id)
                 length += distance
                 continue
 
             # Chunk length overflow.
 
-            # Optimization: try to stick to existing nodes.
+            # Optimization: try to stick to existing nodes if possible.
             if len(current_way) >= 2 and distance <= self.max_degrees:
                 # Split way on this node.
                 """
-                Case 1:
+                Case 0:
                     l1        l2
                 P1 ---- P2 ---------- P3
                 l1 < max_degrees,
@@ -93,96 +85,90 @@ class WaySplitter:
                 current_way = current_way[-1:]
                 current_way.append(node_cur_id)
                 length = distance
-                node_prev = node_cur
 
                 # New split point is an intersection
                 self.way_intersections.add(current_way[0])
+                continue
 
-                #print("  len overflow: broke optimistically: {}".format(split_ways[-1]))
-            else:
-                """
-                Case 1:
-                    l1                    l2
-                P1 ---- P2 -------------------------------- P3
-                l1 < max_degrees, but l1+l2 > max_degrees
-                Result, two ways:
-                P1 ---- P2 ------------- Art1  Art1 ------------------- P3
+            # Real splitting with adding new points follows.
+            """
+            Case 1:
+                l1                    l2
+            P1 ---- P2 -------------------------------- P3
+            l1 < max_degrees, but l1+l2 > max_degrees
+            Result, two ways:
+            P1 ---- P2 ------------- Art1  Art1 ------------------- P3
 
-                Case 2:            l1
-                P1 ------------------------------------- P2
-                with l1>max_degrees
+            Case 2:            l1
+            P1 ------------------------------------- P2
+            with l1>max_degrees
 
-                Result:
-                P1 ---- Art1  Art1 ---- Art2  Art2 ----- P2
+            Result:
+            P1 ---- Art1  Art1 ---- Art2  Art2 ----- P2
 
-                """
-                #print("  len overflow: art point needed")
+            """
+            # Artificial node required.
+            # Construct a direction vector
+            vector = self.unit_vector(node_prev, node_cur, distance)
+            # We need one, or more artificial points.
+            times = int((length + distance) / self.max_degrees)
 
-                # TODO: Factor out  as a func.
-                # TODO: implement Node as a class with math.
-                # Artificial node required.
-                # Construct a direction vector
-                vector = node_cur[0] - node_prev[0], node_cur[1] - node_prev[1]
-                # normalize vector length to 1.
-                vector = [x / distance for x in vector]
-                # We need one, or more artificial points.
-                times = int((length + distance) / self.max_degrees)
-                #print("  splitting {} times".format(times))
+            for i in range(0, times):
+                # Create node, as far as possible
+                # node_new = node_cur + vector * max_degrees
+                to_go = self.max_degrees - length
+                node_new = tuple(
+                    prev + v * to_go
+                    for prev, v in zip(node_prev, vector)
+                )
+                art_id = self.new_intersection(node_new, original_id=node_cur_id, cnt=i)
 
-                for i in range(0, times):
-                    # Create node, as far as possible
-                    # node_new = node_cur + vector * max_degrees
-                    node_new = tuple(
-                        prev + v * self.max_degrees * i
-                        for prev, v in zip(node_prev, vector)
-                    )
-                    art_id = node_cur_id * 10000 + i
-                    #print("  new_node: {} -> {}".format(art_id, node_new))
-                    self.way_nodes[art_id] = node_new
+                # Finish current_way, and start new one.
+                current_way.append(art_id)
+                split_ways.append(current_way)
 
-                    # Finish current_way, and start new one.
-                    current_way.append(art_id)
-                    split_ways.append(current_way)
+                # Start new one from the artificial point
+                current_way = current_way[-1:]
 
-                    # Start new one from the artificial point
-                    current_way = current_way[-1:]
-                    length = 0
+                node_prev = node_new
+                length = 0
 
-                    # New split point is an intersection
-                    self.way_intersections.add(current_way[0])
-
-                    #print("    art point added, split {}".format(split_ways[-1]))
-
-                # Finally - add the last point which caused all the fus.
-                current_way.append(node_cur_id)
-                node_prev = node_cur
-
-            # End of overflow handling
+            # Finally - add the last point which caused all the fus.
+            current_way.append(node_cur_id)
 
         # Last one
-        if len(current_way) > 1:
-            split_ways.append(current_way)
+        assert len(current_way) > 1
+        split_ways.append(current_way)
 
-        # DEBUG
-        """
-        coords = shapely.geometry.LineString(
-            self.way_nodes[nid]
-            for nid in node_lst
-        )
-        print()
-        print()
-        print()
-        print(geojson.dumps(coords))
-
-        collection = shapely.geometry.collection.GeometryCollection([
-            shapely.geometry.LineString(
-                self.way_nodes[nid]
-                for nid in way
-            )
-            for way in split_ways
-        ])
-        print("  ", geojson.dumps(collection))
-        """
         return split_ways
 
+    @staticmethod
+    def unit_vector(start, stop, distance):
+        """
+        Calculate a unit (length=1) vector showing direction from "start" node to "stop"
+        node.
+        """
+        return (
+            (stop[0] - start[0])/distance,
+            (stop[1] - start[1])/distance
+        )
 
+    def new_intersection(self, coords, original_id, cnt):
+        """
+        Register a new point. Base ID on source point.
+        Args:
+            coords: coordinates (lon, lat)
+            original_id: ID of original point
+            cnt: new node number
+
+        Returns:
+            ID of new point
+        """
+        while True:
+            new_id = original_id * 10000 + cnt
+            if new_id not in self.way_nodes:
+                break
+            cnt += 10
+        self.way_nodes[new_id] = coords
+        self.way_intersections.add(new_id)
+        return new_id
