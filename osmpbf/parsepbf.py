@@ -20,12 +20,12 @@
 #       Altered heavily in 2018 by Exatel.
 
 from time import time
-from . import fileformat_pb2
-from . import osmformat_pb2
 from struct import unpack
 import zlib
-
 from collections import namedtuple
+
+from . import fileformat_pb2
+from . import osmformat_pb2
 
 Way = namedtuple('Way', 'way_id, tags, nodes')
 Node = namedtuple('Node', 'node_id, lon, lat, tags')
@@ -135,14 +135,14 @@ class PBFParser:
         if size <= 0:
             return False
 
-        if self.blobhead.ParseFromString(self.fpbf.read(size)) == False:
+        if self.blobhead.ParseFromString(self.fpbf.read(size)) is False:
             return False
         return True
 
     def read_blob(self):
         """Get the blob data, store the data for later"""
         size = self.blobhead.datasize
-        if self.blob.ParseFromString(self.fpbf.read(size)) == False:
+        if self.blob.ParseFromString(self.fpbf.read(size)) is False:
             return False
         if self.blob.raw_size > 0:
             # uncompress the raw data
@@ -150,17 +150,17 @@ class PBFParser:
             #print "uncompressed BlobData %s"%(self.BlobData)
         else:
             #the data does not need uncompressing
-            self.BlobData = raw
+            self.BlobData = self.blob.raw
         return True
 
     def read_next_block(self):
         """read the next block. Block is a header and blob, then extract the block"""
         # read a BlobHeader to get things rolling. It should be 'OSMData'
-        if self.read_pbf_blob_header() == False:
+        if self.read_pbf_blob_header() is False:
             return False
 
         if self.blobhead.type != "OSMData":
-            print("Expected OSMData, found %s"%(self.blobhead.type))
+            print("Expected OSMData, found %s" % (self.blobhead.type))
             return False
 
         # read a Blob to actually get some data
@@ -175,9 +175,9 @@ class PBFParser:
         """process a dense node block"""
         NANO = 1000000000
         #DenseNode uses a delta system of encoding os everything needs to start at zero
-        lastID = 0
-        lastLat = 0
-        lastLon = 0
+        last_id = 0
+        last_lat = 0
+        last_lon = 0
         tagloc = 0
         #cs = 0
         #ts = 0
@@ -187,11 +187,11 @@ class PBFParser:
         latoff = float(self.primblock.lat_offset)
         lonoff = float(self.primblock.lon_offset)
         for i in range(len(dense.id)):
-            lastID += dense.id[i]
-            lastLat += dense.lat[i]
-            lastLon += dense.lon[i]
-            lat = float(lastLat*gran + latoff) / NANO
-            lon = float(lastLon*gran + lonoff) / NANO
+            last_id += dense.id[i]
+            last_lat += dense.lat[i]
+            last_lon += dense.lon[i]
+            lat = float(last_lat*gran + latoff) / NANO
+            lon = float(last_lon*gran + lonoff) / NANO
             #user += dense.denseinfo.user_sid[i]
             #uid += dense.denseinfo.uid[i]
             #vs = dense.denseinfo.version[i]
@@ -199,7 +199,7 @@ class PBFParser:
             #cs += dense.denseinfo.changeset[i]
             #suser = self.primblock.stringtable.s[user]
             #tm = ts*self.primblock.date_granularity/1000
-            node = Node(node_id=lastID, lon=lon, lat=lat, tags={})
+            node = Node(node_id=last_id, lon=lon, lat=lat, tags={})
             if tagloc<len(dense.keys_vals):  # don't try to read beyond the end of the list
                 while dense.keys_vals[tagloc]!=0:
                     ky = dense.keys_vals[tagloc]
@@ -219,7 +219,7 @@ class PBFParser:
         latoff = float(self.primblock.lat_offset)
         lonoff = float(self.primblock.lon_offset)
         for nd in nodes:
-            nodeid = nd.id
+            node_id = nd.id
             lat = float(nd.lat*gran+latoff)/NANO
             lon = float(nd.lon*gran+lonoff)/NANO
             #vs = nd.info.version
@@ -228,7 +228,7 @@ class PBFParser:
             #user = nd.info.user_sid
             #cs = nd.info.changeset
             #tm = ts*self.primblock.date_granularity/1000
-            node = Node(node_id=lastID, lon=lon, lat=lat, tags={})
+            node = Node(node_id=node_id, lon=lon, lat=lat, tags={})
 
             for i in range(len(nd.keys)):
                 ky = nd.keys[i]
@@ -243,14 +243,14 @@ class PBFParser:
     def process_ways(self, ways):
         """process the ways in a block, extracting id, nds & tags"""
         for wy in ways:
-            wayid = wy.id
+            way_id = wy.id
             #vs = wy.info.version
             #ts = wy.info.timestamp
             #uid = wy.info.uid
             #user = self.primblock.stringtable.s[wy.info.user_sid]
             #cs = wy.info.changeset
             #tm = ts*self.primblock.date_granularity/1000
-            way = Way(way_id=wayid, nodes=[], tags={})
+            way = Way(way_id=way_id, nodes=[], tags={})
             ndid = 0
             for nd in wy.refs:
                 ndid += nd
@@ -303,8 +303,8 @@ class PBFParser:
         machine byte order. Return -1 if eof
         """
         be_int = self.fpbf.read(4)
-        if len(be_int) == 0:
+        if not be_int:
             return -1
-        else:
-            le_int = unpack('!L',be_int)
-            return le_int[0]
+
+        le_int = unpack('!L',be_int)
+        return le_int[0]

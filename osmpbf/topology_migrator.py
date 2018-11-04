@@ -3,12 +3,11 @@
 Author: Tomasz Fortuna <bla@thera.be>
 License: GPLv3
 """
-import threading
-from time import time
 import enum
 import shapely.geometry
 import shapely.wkt
 import shapely.wkb
+from .way_splitter import WaySplitter
 
 class WayMapping(enum.Enum):
     """
@@ -50,14 +49,6 @@ class WayMapping(enum.Enum):
     #cycleway = 2100
     #footway = 2100
 
-class DataPusher(threading.Thread):
-    """
-    Split IO bound problem into 2 cores.
-    """
-    def __init__(self, conn):
-        self.ways_buffer = []
-
-
 class TopologyMigrator:
     """
     Output - topology which allows to migrate from start_id to any_id.
@@ -74,9 +65,9 @@ class TopologyMigrator:
 
     To calculate length I need lat/lon of... ALL POINTS - not only intersections.
     """
-    CHUNK_SIZE=1000
+    CHUNK_SIZE=5000
 
-    def __init__(self, conn):
+    def __init__(self, conn, max_meters=None):
         self.conn = conn
         # Points within routable graph.
         # Step 1: aggregate ids, and info if are intersection nodes or not.
@@ -92,7 +83,17 @@ class TopologyMigrator:
         self.ways_buffer = []
         self.nodes_buffer = []
 
+        if max_meters is not None:
+            self.way_splitter = WaySplitter(self.way_nodes,
+                                            self.way_intersections,
+                                            max_meters)
+        else:
+            self.way_splitter = None
+
     def create_db(self):
+        """
+        Create topology model
+        """
         script = """
         DROP TABLE IF EXISTS r_nodes;
         DROP TABLE IF EXISTS r_ways;
@@ -149,7 +150,7 @@ class TopologyMigrator:
 
         highway = highway.decode('ascii')
         try:
-            WayMapping[highway]
+            _ = WayMapping[highway]
             return False
         except KeyError:
             self.ways_ignored += 1
@@ -168,13 +169,19 @@ class TopologyMigrator:
             return
         self.ways_found += 1
 
-        # Mark intersection nodes
+        # Mark all nodes and intersections for aggregating data
+        for node_id in way.nodes:
+            # If the node was already marked - it is an intersection.
+            if node_id in self.way_nodes:
+                self.way_intersections.add(node_id)
+
+            # Mark as used.
+            self.way_nodes[node_id] = None
+
+        # Always mark beginning/end as intersection nodes
         self.way_intersections.add(way.nodes[0])
         self.way_intersections.add(way.nodes[-1])
 
-        # Mark all nodes and intersections for aggregating data
-        for node_id in way.nodes:
-            self.way_nodes[node_id] = None
 
     def node_cb(self, node):
         """
@@ -188,6 +195,9 @@ class TopologyMigrator:
     def way_cb(self, way):
         """
         Way-callback used in second pass to split and migrate ways.
+
+        We split ways on intersections and then artificially split ways if they
+        are too long.
         """
         if self.filter_way(way):
             return
@@ -198,13 +208,12 @@ class TopologyMigrator:
 
         name = way.tags.get(b'name', b'').decode('utf-8')
 
-        # Single way should be split if there's intersection if another route
-        # in the middle.
-
+        # List of split ways created from input way.
+        # Single node is always shared between split ways
         # [[node_id1, node_id2, ..., node_idX], [node_idX, node_idX+1, ...]]
-        # One node is always shared between ways)
         split_ways = []
 
+        # 1) Built ways and split them on intersections.
         cur_way = [way.nodes[0]]
         for node_id in way.nodes[1:]:
             if node_id in self.way_intersections:
@@ -216,7 +225,17 @@ class TopologyMigrator:
                 # Just aggregate - no intersection here.
                 cur_way.append(node_id)
 
-        for i, nodes in enumerate(split_ways):
+        # 2) Split too long split_ways even further.
+
+        if self.way_splitter is not None:
+            short_ways = []
+            for split_way in split_ways:
+                short_ways += self.way_splitter.split(split_way)
+        else:
+            short_ways = split_ways
+
+        # 3) Store ways in DB
+        for i, nodes in enumerate(short_ways):
             geom = [self.way_nodes[node_id] for node_id in nodes]
             line_string = shapely.geometry.LineString(geom)
             cur_id = way.way_id * 10000 + i
@@ -242,7 +261,7 @@ class TopologyMigrator:
         """
         Flush buffers into the DB
 
-        TODO COPY is faster. Yet executemany seems to do the trick.
+        TODO: COPY would be faster. Yet executemany seems to do the trick.
         """
         if self.ways_buffer:
             sql = ("INSERT INTO r_ways (id, id_osm, type,  source, target, "
@@ -297,6 +316,5 @@ class TopologyMigrator:
             sql = "UPDATE r_ways SET length=ST_Length(geom::geography)"
             cursor.execute(sql)
         self.conn.commit()
-
 
         self.index_db()
