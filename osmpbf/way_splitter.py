@@ -1,9 +1,25 @@
+# Copyright © 2018 Exatel S.A.
+# Contact: opensource@exatel.pl
+# LICENSE: GPL-3.0-or-later, See COPYING file
+# Author: Tomasz Fortuna
+
+"""
+Our algorithms crawl street graphs node by node and execute some actions at
+the nodes. When the ways are very long (kilometers) without having any
+intersections, the accuracy of the algorithms suffer. To improve accuracy
+without adding additional complications we've altered the import algorithm to
+split the overly long ways by inserting artificial nodes.
+"""
+
 import math
+
 
 def m2deg(meters):
     """
     Convert length in meters to degrees in a simplified way, linearized around
     center of Poland: ~ latitude 52.0393, longitude 19.4866.
+
+    It should work well enough in Europe/USA for the way splitter.
 
     0.0001° = 11.11949266456835m (latitudinal) -> 111194.92664568349m
     0.0001° =  6.83982215626177m (longitudinal) -> 68398.22156261769m
@@ -13,6 +29,7 @@ def m2deg(meters):
     """
     meters_per_degree = 90634.692934
     return meters / meters_per_degree
+
 
 def deg2m(degrees):
     """Inverse of m2deg"""

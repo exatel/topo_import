@@ -9,6 +9,9 @@ import. For a single Masovian voivodeship: osm2pgrouting uses 10 minutes and
 14GB of RAM. This project needs 2 minutes and 1GB of RAM - with a similar end
 result (same length of migrated ways, less unnecessary splits).
 
+This later turned out to be easy to extend and allowed us to easily modify the
+import to add a way splitting.
+
 Model
 -----
 
@@ -41,15 +44,19 @@ Nodes table, contains only nodes on intersections of the ways.
      geom   | geometry(Point,4326)
 
 
+If using the way splitter the new, artificial, nodes are given IDs equal to the
+original node ID * 10000 + internal counter.
+
 
 License & Credits
 -----------------
 
-PBF file parsing is based on a project found at:
+This program is licensed under GNU GPLv3 license.
+
+
+The PBF file parsing is based on a GPLv3 parsepbf project, found originally at:
 http://pbf.raggedred.net/parsepbf.tar.bz2
-Original readme in osmpbf/readme.txt.
+Original readme is located in osmpbf/readme.txt.
 
-Program was heavily rewritten to use callback-way approach instead of RAM-heavy
-caching of everything.
-
-Therefore the code is licensed under GPLv3 license.
+Library was heavily rewritten to use a callback approach during reading to ease
+the RAM usage and refresh the code a bit.

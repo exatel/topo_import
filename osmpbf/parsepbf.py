@@ -27,9 +27,11 @@ from collections import namedtuple
 from . import fileformat_pb2
 from . import osmformat_pb2
 
+
 Way = namedtuple('Way', 'way_id, tags, nodes')
 Node = namedtuple('Node', 'node_id, lon, lat, tags')
 Relation = namedtuple('Relation', 'relation_id, members, tags')
+
 
 class PBFParser:
     """Manage the process of parsing an osm.pbf file"""
@@ -59,28 +61,28 @@ class PBFParser:
         self.last_status = time()
 
         self.membertype = {
-            0:'node',
-            1:'way',
-            2:'relation'
+            0: 'node',
+            1: 'way',
+            2: 'relation'
         }
 
     def init(self):
         """Check the file headers"""
         # read the blob header
-        if self.read_pbf_blob_header() == False:
+        if self.read_pbf_blob_header() is False:
             return False
 
-        #read the blob
-        if self.read_blob() == False:
+        # read the blob
+        if self.read_blob() is False:
             return False
 
-        #check the contents of the first blob are supported
+        # check the contents of the first blob are supported
         self.hblock.ParseFromString(self.BlobData)
         for rf in self.hblock.required_features:
-            if rf in ("OsmSchema-V0.6","DenseNodes"):
+            if rf in ("OsmSchema-V0.6", "DenseNodes"):
                 pass
             else:
-                print("not a required feature %s"%(rf))
+                print("not a required feature %s" % rf)
                 return False
         return True
 
@@ -147,9 +149,9 @@ class PBFParser:
         if self.blob.raw_size > 0:
             # uncompress the raw data
             self.BlobData = zlib.decompress(self.blob.zlib_data)
-            #print "uncompressed BlobData %s"%(self.BlobData)
+            # print "uncompressed BlobData %s"%(self.BlobData)
         else:
-            #the data does not need uncompressing
+            # the data does not need uncompressing
             self.BlobData = self.blob.raw
         return True
 
@@ -164,7 +166,7 @@ class PBFParser:
             return False
 
         # read a Blob to actually get some data
-        if self.read_blob() == False:
+        if self.read_blob() is False:
             return False
 
         # extract the primative block
@@ -174,15 +176,15 @@ class PBFParser:
     def process_dense(self, dense):
         """process a dense node block"""
         NANO = 1000000000
-        #DenseNode uses a delta system of encoding os everything needs to start at zero
+        # DenseNode uses a delta system of encoding os everything needs to start at zero
         last_id = 0
         last_lat = 0
         last_lon = 0
         tagloc = 0
-        #cs = 0
-        #ts = 0
-        #uid = 0
-        #user = 0
+        # cs = 0
+        # ts = 0
+        # uid = 0
+        # user = 0
         gran = float(self.primblock.granularity)
         latoff = float(self.primblock.lat_offset)
         lonoff = float(self.primblock.lon_offset)
@@ -192,16 +194,16 @@ class PBFParser:
             last_lon += dense.lon[i]
             lat = float(last_lat*gran + latoff) / NANO
             lon = float(last_lon*gran + lonoff) / NANO
-            #user += dense.denseinfo.user_sid[i]
-            #uid += dense.denseinfo.uid[i]
-            #vs = dense.denseinfo.version[i]
-            #ts += dense.denseinfo.timestamp[i]
-            #cs += dense.denseinfo.changeset[i]
-            #suser = self.primblock.stringtable.s[user]
-            #tm = ts*self.primblock.date_granularity/1000
+            # user += dense.denseinfo.user_sid[i]
+            # uid += dense.denseinfo.uid[i]
+            # vs = dense.denseinfo.version[i]
+            # ts += dense.denseinfo.timestamp[i]
+            # cs += dense.denseinfo.changeset[i]
+            # suser = self.primblock.stringtable.s[user]
+            # tm = ts*self.primblock.date_granularity/1000
             node = Node(node_id=last_id, lon=lon, lat=lat, tags={})
-            if tagloc<len(dense.keys_vals):  # don't try to read beyond the end of the list
-                while dense.keys_vals[tagloc]!=0:
+            if tagloc < len(dense.keys_vals):  # don't try to read beyond the end of the list
+                while dense.keys_vals[tagloc] != 0:
                     ky = dense.keys_vals[tagloc]
                     vl = dense.keys_vals[tagloc+1]
                     tagloc += 2
@@ -222,12 +224,12 @@ class PBFParser:
             node_id = nd.id
             lat = float(nd.lat*gran+latoff)/NANO
             lon = float(nd.lon*gran+lonoff)/NANO
-            #vs = nd.info.version
-            #ts = nd.info.timestamp
-            #uid = nd.info.uid
-            #user = nd.info.user_sid
-            #cs = nd.info.changeset
-            #tm = ts*self.primblock.date_granularity/1000
+            # vs = nd.info.version
+            # ts = nd.info.timestamp
+            # uid = nd.info.uid
+            # user = nd.info.user_sid
+            # cs = nd.info.changeset
+            # tm = ts*self.primblock.date_granularity/1000
             node = Node(node_id=node_id, lon=lon, lat=lat, tags={})
 
             for i in range(len(nd.keys)):
@@ -244,12 +246,12 @@ class PBFParser:
         """process the ways in a block, extracting id, nds & tags"""
         for wy in ways:
             way_id = wy.id
-            #vs = wy.info.version
-            #ts = wy.info.timestamp
-            #uid = wy.info.uid
-            #user = self.primblock.stringtable.s[wy.info.user_sid]
-            #cs = wy.info.changeset
-            #tm = ts*self.primblock.date_granularity/1000
+            # vs = wy.info.version
+            # ts = wy.info.timestamp
+            # uid = wy.info.uid
+            # user = self.primblock.stringtable.s[wy.info.user_sid]
+            # cs = wy.info.changeset
+            # tm = ts*self.primblock.date_granularity/1000
             way = Way(way_id=way_id, nodes=[], tags={})
             ndid = 0
             for nd in wy.refs:
@@ -268,17 +270,17 @@ class PBFParser:
     def process_rels(self, rels):
         for rl in rels:
             relid = rl.id
-            vs = rl.info.version
-            #ts = rl.info.timestamp
-            #uid = rl.info.uid
-            #user = self.primblock.stringtable.s[rl.info.user_sid]
-            #cs = rl.info.changeset
-            #tm = ts*self.primblock.date_granularity/1000
+            # vs = rl.info.version
+            # ts = rl.info.timestamp
+            # uid = rl.info.uid
+            # user = self.primblock.stringtable.s[rl.info.user_sid]
+            # cs = rl.info.changeset
+            # tm = ts*self.primblock.date_granularity/1000
             rel = Relation(relation_id=relid, members=[], tags={})
             memid = 0
             for i in range(len(rl.memids)):
                 role = rl.roles_sid[i]
-                memid+=rl.memids[i]
+                memid += rl.memids[i]
                 memtype = self.membertype[rl.types[i]]
                 memrole = self.primblock.stringtable.s[role]
                 member = {
@@ -306,5 +308,5 @@ class PBFParser:
         if not be_int:
             return -1
 
-        le_int = unpack('!L',be_int)
+        le_int = unpack('!L', be_int)
         return le_int[0]

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""
-(C) 2018 Exatel SA
-Author: Tomasz Fortuna <bla@thera.be>
-License: GPLv3
-"""
+
+# Copyright © 2018 Exatel S.A.
+# Contact: opensource@exatel.pl
+# LICENSE: GPL-3.0-or-later, See COPYING file
+# Author: Tomasz Fortuna
 
 import sys
 import os.path
@@ -14,6 +14,7 @@ import psycopg2.extras
 
 from osmpbf import PBFParser
 from osmpbf import TopologyMigrator
+
 
 def parse_args():
     p = argparse.ArgumentParser()
@@ -45,6 +46,7 @@ def parse_args():
 
     return args
 
+
 def connect(args):
     print("Connect to database")
     conn = psycopg2.connect(host=args.host,
@@ -55,6 +57,7 @@ def connect(args):
                             cursor_factory=psycopg2.extras.NamedTupleCursor)
 
     return conn
+
 
 def main():
     # the main part of the program starts here

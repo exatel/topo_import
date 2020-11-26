@@ -1,13 +1,14 @@
-"""
-(C) 2018 Exatel SA
-Author: Tomasz Fortuna <bla@thera.be>
-License: GPLv3
-"""
+# Copyright © 2018 Exatel S.A.
+# Contact: opensource@exatel.pl
+# LICENSE: GPL-3.0-or-later, See COPYING file
+# Author: Tomasz Fortuna
+
 import enum
 import shapely.geometry
 import shapely.wkt
 import shapely.wkb
 from .way_splitter import WaySplitter
+
 
 class WayMapping(enum.Enum):
     """
@@ -15,7 +16,7 @@ class WayMapping(enum.Enum):
 
     Only highway tags listed here are imported.
 
-    https://wiki.openstreetmap.org/wiki/Key:highway
+    ref: https://wiki.openstreetmap.org/wiki/Key:highway
     """
     motorway = 100
     motorway_link = 101
@@ -44,10 +45,11 @@ class WayMapping(enum.Enum):
     # Unknown classification
     road = 1100
 
-    # To be removed
-    #path = 2000
-    #cycleway = 2100
-    #footway = 2100
+    # To be removed probably.
+    # path = 2000
+    # cycleway = 2100
+    # footway = 2100
+
 
 class TopologyMigrator:
     """
@@ -182,7 +184,6 @@ class TopologyMigrator:
         self.way_intersections.add(way.nodes[0])
         self.way_intersections.add(way.nodes[-1])
 
-
     def node_cb(self, node):
         """
         Node-callback used in second pass to aggregate lat/lon of all relevant
@@ -255,7 +256,6 @@ class TopologyMigrator:
         if len(self.ways_buffer) > self.CHUNK_SIZE:
             # Mass import.
             self.flush()
-
 
     def flush(self):
         """
