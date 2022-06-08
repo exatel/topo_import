@@ -7,6 +7,7 @@
 
 import sys
 import os.path
+from time import time
 
 import argparse
 import psycopg2
@@ -29,6 +30,8 @@ def parse_args():
                    help="Import topology into postgresql DB")
     p.add_argument("--address-import", action="store_true",
                    help="Import address data")
+    p.add_argument("--cache-mem", action="store_true",
+                   help="Cache nodes/points in memory instead of a file")
 
     p.add_argument("--port", default=None,
                    help="database connection port")
@@ -76,41 +79,26 @@ def address_import(args):
     Import address geolocalization data.
     """
     extractor = AddressExtractor()
+    start = time()
 
-    with open(args.pbf, "rb") as fpbf:
-        # Pass 0 - gather administrative relations
-        print("Pass 0: Gather administrative regions, mark ways/nodes to be read")
-        p = PBFParser(fpbf, relation_callback=extractor.relation_cb_pass_0)
-        if not p.parse():
-            print("Error while parsing the file")
-            return
+    if args.cache_mem:
+        idx = 'flex_mem'
+    else:
+        idx = 'sparse_file_array,node-cache.data'
 
+    try:
+        extractor.apply_file(args.pbf, locations=True, idx=idx)
+        took = time() - start
+        print(f"Applying file took {took:.1f} seconds")
+        print(f"Final stats {dict(extractor.stats)}")
 
-        # Pass 1: Gather addressed ways and nodes. Some nodes are marked to be read.
-        print("Pass 1: Gather addresses ways and nodes. Mark nodes to be read")
-        fpbf.seek(0)
-        p = PBFParser(fpbf,
-                      way_callback=extractor.way_cb_pass_1,
-                      node_callback=extractor.node_cb_pass_1)
-        if not p.parse():
-            print("Error while parsing the file")
-            return
-
-        del extractor.required_ways
-
-        fpbf.seek(0)
-
-        # Pass 2: Load rest of nodes
-        print("Pass 2: Load rest of nodes")
-        p = PBFParser(fpbf, node_callback=extractor.node_cb_pass_2)
-        if not p.parse():
-            print("Error while parsing the file")
-            return
-        del extractor.required_nodes
-
-        # Map the coords to final destinations
-        extractor.pass_2_finish()
-
+        start = time()
+        extractor.finish()
+        took = time() - start
+        print(f"Matching addresses to administrative boundaries took {took:.1f} seconds")
+    except KeyboardInterrupt:
+        print("Starting shell after interrupt")
+        print(dict(extractor.stats))
 
     from IPython import embed
     embed()
