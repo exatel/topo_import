@@ -15,7 +15,7 @@ import psycopg2.extras
 
 from osmpbf import PBFParser
 from osmpbf import TopologyMigrator
-from osmpbf import AddressExtractor
+from osmpbf import AddressExtractor, StreetMatcher
 
 
 def parse_args():
@@ -75,9 +75,7 @@ def connect(args):
 
 
 def address_import(args):
-    """
-    Import address geolocalization data.
-    """
+    """Import address geolocalization data."""
     extractor = AddressExtractor()
     start = time()
 
@@ -89,13 +87,21 @@ def address_import(args):
     try:
         extractor.apply_file(args.pbf, locations=True, idx=idx)
         took = time() - start
-        print(f"Applying file took {took:.1f} seconds")
+        print(f"Aggregating places took {took:.1f} seconds")
         print(f"Final stats {dict(extractor.stats)}")
+
+        start = time()
+        matcher = StreetMatcher(extractor)
+        matcher.apply_file(args.pbf, locations=True, idx=idx)
+        took = time() - start
+        print(f"Matching streets took {took:.1f} seconds")
+        print(f"Matcher stats {dict(matcher.stats)}")
 
         start = time()
         extractor.finish()
         took = time() - start
         print(f"Matching addresses to administrative boundaries took {took:.1f} seconds")
+        print(f"Total extract time is {extractor.took:.1f}s")
     except KeyboardInterrupt:
         print("Starting shell after interrupt")
         print(dict(extractor.stats))

@@ -3,6 +3,13 @@
 # LICENSE: GPL-3.0-or-later, See COPYING file
 # Author: Tomasz Fortuna
 
+"""
+Migrates street topology from OSM pbf file into postgresql in a way which
+enables easy routing.
+
+TODO: Migrate to pyosmium.
+"""
+
 import enum
 import shapely.geometry
 import shapely.wkt
@@ -18,6 +25,7 @@ class WayMapping(enum.Enum):
 
     ref: https://wiki.openstreetmap.org/wiki/Key:highway
     """
+
     motorway = 100
     motorway_link = 101
     motorway_junction = 102
