@@ -16,6 +16,7 @@ import psycopg2.extras
 from osmpbf import PBFParser
 from osmpbf import TopologyMigrator
 from osmpbf import AddressExtractor, StreetMatcher
+from IPython import embed
 
 
 def parse_args():
@@ -92,6 +93,7 @@ def address_import(args):
 
         start = time()
         matcher = StreetMatcher(extractor)
+        print("Starting street matcher")
         matcher.apply_file(args.pbf, locations=True, idx=idx)
         took = time() - start
         print(f"Matching streets took {took:.1f} seconds")
@@ -106,7 +108,7 @@ def address_import(args):
         print("Starting shell after interrupt")
         print(dict(extractor.stats))
 
-    from IPython import embed
+    # Allow manipulation of loaded data before quitting.
     embed()
 
 

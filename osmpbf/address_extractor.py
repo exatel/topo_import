@@ -16,45 +16,53 @@ Handles:
 It's tuned currently for Poland (administrative levels for example; 8 seems to
 be city, but 9 is applicable to addresses). Should be easy to change.
 
-
 Example extract from Poland:
 - 8033831 places total
-- 23881 places without city
-- 5114119 places with city and street
-- 1945391 without street name, with matched unnamed street by distance
+- 1573 places without city
+- 5297743 places with city and named street
+- 7778386 with city and a street matched to a way (including unnamed)
+- 2651073 streets matched to a way (170k named)
 
 extractor.stats:
- 'nodes': 186336433,
- 'node_no_housenumber': 182717327,
- 'no_street_idx': 2904957,
- 'ways': 25851413,
- 'way_not_building': 9693906,
- 'areas': 20019609,
- 'areas_not_boundary': 19971369,
- 'way_no_housenumber': 11742782,
- 'areas_bad_level': 2218,
- 'areas_not_administrative': 17084,
- 'areas_gmina': 2174,
- 'areas_powiat': 314,
+ 'addr_no_city': 2929308,
+ 'addr_no_city_with_place': 2900615,
+ 'addr_no_city_with_street': 42663,
+ 'addr_no_street': 2904957,
+ 'addr_no_street_with_place': 2904730,
+ 'addr_with_place_and_street': 14509,
  'area_with_runtime_error': 4,
- 'max_area_distance': 6.720596286607508,
- 'matched_area_lvl8': 1830737,
- 'bounding_box_but_no_match': 2810879,
- 'matched_area_lvl7': 1074624,
- 'matched_area_lvl6': 1074626,
- 'place_without_region': 1752,
- 'matched_area_lvl9': 19200,
- 'matched_area_lvl5': 1122
+ 'areas': 20019609,
+ 'areas_bad_level': 2218,
+ 'areas_gmina': 2174,
+ 'areas_not_administrative': 17084,
+ 'areas_not_boundary': 19971369,
+ 'areas_powiat': 314,
+ 'bounding_box_but_no_match': 63086,
+ 'matched_area_lvl5': 2304,
+ 'matched_area_lvl6': 27067,
+ 'matched_area_lvl7': 27067,
+ 'matched_area_lvl8': 25908,
+ 'matched_area_lvl9': 102,
+ 'max_area_distance': 0.5317941698374715,
+ 'no_street_idx': 2904957,
+ 'node_no_housenumber': 182717327,
+ 'nodes': 186336433,
+ 'place_without_region': 41
+ 'way_no_housenumber': 11742782,
+ 'way_not_building': 9693906,
+ 'ways': 25851413,
 
 matcher.stats:
- 'ways': 25851413,
- 'streets': 4386685,
- 'street_close_enough': 4167777,
- 'place_street_new': 2614862,
- 'street_too_far': 1134984,
- 'place_street_no_override': 1552915,
- 'unknown_street': 508552,
  'ignore_street_type': 3251281
+ 'place_street_keep_named': 103605,
+ 'place_street_new': 3775515,
+ 'place_street_no_override': 2983263,
+ 'place_street_override': 177246,
+ 'street_close_enough': 6936024,
+ 'street_too_far': 2835054,
+ 'streets': 4386685,
+ 'unknown_street': 508552,
+ 'ways': 25851413,
 """
 
 import time
@@ -97,16 +105,20 @@ class Area:
 @dataclass
 class Place:
     """Addressed place, from way or from a node."""
-
     pid: str
     name: str
     addr: Address
     amenity: Optional[str]
     geo: object
-    # From node or from a way?
-    from_way: bool
-    # Best matched street distance
+
+    # Best matched street distance. Will be large for directly addressed
+    # streets.
     street_distance: float
+    # When street name is copied from a way, this is a way ID
+    street_id: str = None
+
+    # City was set from the administrative area.
+    city_from_area: bool = False
 
 
 class AddressExtractor(osmium.SimpleHandler):
@@ -120,6 +132,7 @@ class AddressExtractor(osmium.SimpleHandler):
         self.places: list[Place] = []
 
         # Many nodes don't fancy a street. Index them so we can match streets as we read them
+        # We CAN'T sort places while this index is in use.
         self.address_idx = rtree.Index(interleaved=True)
 
         # Administrative areas by ID
@@ -141,7 +154,7 @@ class AddressExtractor(osmium.SimpleHandler):
         """Save places to CSV file."""
         fields = [
             'pid', 'name', 'city', 'postcode', 'street', 'housenumber',
-            'simc', 'amenity', 'lon', 'lat', 'street_distance'
+            'simc', 'amenity', 'lon', 'lat', 'street_distance', 'city_from_area'
         ]
         start = time.time()
         with open(filename, "w") as csvf:
@@ -152,7 +165,7 @@ class AddressExtractor(osmium.SimpleHandler):
                     place.pid, place.name, place.addr.city, place.addr.postcode,
                     place.addr.street, place.addr.housenumber, place.addr.city_simc,
                     place.amenity, place.geo.coords[0][0], place.geo.coords[0][1],
-                    place.street_distance
+                    place.street_distance, "1" if place.city_from_area else "0"
                 ]
                 writer.writerow(data)
                 if idx % 100000 == 0:
@@ -192,7 +205,6 @@ class AddressExtractor(osmium.SimpleHandler):
             amenity=tags.get('amenity', ''),
             addr=address,
             geo=geo.centroid,
-            from_way=True,
             # For places without streets will be relaxed later to the nearest street (in degrees).
             street_distance=360,
         )
@@ -220,8 +232,7 @@ class AddressExtractor(osmium.SimpleHandler):
             amenity=tags.get('amenity', ''),
             addr=address,
             geo=shapely.geometry.Point(node.location.lon, node.location.lat),
-            from_way=False,
-            street_distance=99999,
+            street_distance=360,
         )
         self.index_address(place)
 
@@ -313,10 +324,32 @@ class AddressExtractor(osmium.SimpleHandler):
 
     def tags_to_address(self, tags):
         """Convert OSM tags to address handling nulls."""
+        place = tags.get('addr:place', '')
+        street = tags.get('addr:street', '')
+        city = tags.get('addr:city', '')
+        # Enumerate different cases in stats
+        if not city:
+            self.stats['addr_no_city'] += 1
+            if place:
+                self.stats['addr_no_city_with_place'] += 1
+            if street:
+                self.stats['addr_no_city_with_street'] += 1
+
+        if not street:
+            self.stats['addr_no_street'] += 1
+            if place:
+                self.stats['addr_no_street_with_place'] += 1
+        else:
+            if place:
+                # This is an error according to:
+                # https://wiki.openstreetmap.org/wiki/Key:addr:place
+                self.stats['addr_with_place_and_street'] += 1
+
         return Address(
             housenumber=tags.get('addr:housenumber', ''),
-            city=tags.get('addr:city', ''),
-            street=tags.get('addr:street', ''),
+            # Fall back to place, which seems to work sometimes in Poland
+            city=city or place,
+            street=street,
             postcode=tags.get('addr:postcode', ''),
             city_simc=tags.get('addr:city:simc', ''),
         )
@@ -337,6 +370,8 @@ class AddressExtractor(osmium.SimpleHandler):
         # Coord form for interleaved:
         # [xmin, ymin, ..., kmin, xmax, ymax, ..., kmax].
 
+        # Indices in address_idx will be invalid after the sort.
+        del self.address_idx
         self.places.sort(key=lambda place: (place.addr.city,
                                             place.addr.street,
                                             place.addr.housenumber))
@@ -356,9 +391,9 @@ class AddressExtractor(osmium.SimpleHandler):
             ]
 
             # From highest level (7) to lowest (9)
-            parents.sort(key=lambda ar: ar.level, reverse=True)
+            parents.sort(key=lambda ar: ar.level, reverse=False)
 
-            if pos % 20000 == 0:
+            if pos % 5000 == 0:
                 took = time.time() - start
                 print(f"Matching to cities {pos}/{len(unmatched)} in "
                       f"{took:.1f} {pos/took:.1f}/s {dict(self.stats)}")
@@ -366,9 +401,10 @@ class AddressExtractor(osmium.SimpleHandler):
             for parent in parents:
                 # Additional check, as bounding boxes are not perfect
                 if parent.geo.contains(place.geo):
-                    place.addr.city = area.name
+                    place.addr.city = parent.name
+                    place.city_from_area = True
 
-                    distance = place.geo.distance(area.centroid)
+                    distance = place.geo.distance(parent.centroid)
                     self.stats['max_area_distance'] = max(distance,
                                                           self.stats['max_area_distance'])
                     self.stats[f'matched_area_lvl{parent.level}'] += 1
@@ -413,6 +449,7 @@ class StreetMatcher(osmium.SimpleHandler):
 
         if 'highway' not in tags:
             return
+
         way_type = tags.get("highway")
 
         self.stats['streets'] += 1
@@ -428,19 +465,32 @@ class StreetMatcher(osmium.SimpleHandler):
         # Village names might have empty name and it's ok.
 
         # TODO: Can it be done more directly?
-        wkt = self.wktfab.create_linestring(way)
-        geo = shapely.wkt.loads(wkt)
+        try:
+            wkt = self.wktfab.create_linestring(way)
+            geo = shapely.wkt.loads(wkt)
+        except osmium._osmium.InvalidLocationError:
+            self.stats['way_with_invalid_location'] += 1
+            return
 
-        for place_idx in self.extractor.address_idx.nearest(geo.centroid.coords[0], 100):
+        # Do intersection with street bounding box to find all possible houses.
+        # Then iterate over possibilities and measure actual distance and bind
+        # to the closest street.
+        residential = (
+            geo.bounds[0] - self.MAX_DISTANCE, geo.bounds[1] - self.MAX_DISTANCE,
+            geo.bounds[2] + self.MAX_DISTANCE, geo.bounds[3] + self.MAX_DISTANCE
+        )
+        for place_idx in self.extractor.address_idx.intersection(residential):
             place = self.extractor.places[place_idx]
+
             distance = geo.distance(place.geo)
             if distance > self.MAX_DISTANCE:
                 # Over some distance it doesn't matter. Let's assume it's not on this street
                 self.stats['street_too_far'] += 1
-                break
+                continue
             self.stats['street_close_enough'] += 1
 
             if distance < place.street_distance:
+                # Street is closer than the previous one.
                 if place.addr.street:
                     self.stats['place_street_override'] += 1
                     if not name:
@@ -449,7 +499,8 @@ class StreetMatcher(osmium.SimpleHandler):
                         continue
                 else:
                     self.stats['place_street_new'] += 1
+                place.addr.street = name
                 place.street_distance = distance
-                place.street = name
+                place.street_id = way.id
             else:
                 self.stats['place_street_no_override'] += 1
