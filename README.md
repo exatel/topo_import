@@ -48,6 +48,19 @@ If using the way splitter the new, artificial, nodes are given IDs equal to the
 original node ID * 10000 + internal counter.
 
 
+Address exporter
+----------------
+
+Address exporter exports address data from OSM PBF file using pyosmium library.
+
+Example call:
+./topo_import.py --address-import --pbf ~/poland-latest.osm.pbf --cache-mem
+extractor.save_to_csv("output.csv")
+
+With `--cache-mem` will require around 12GB of free RAM to extract from Poland.
+Without this option uses a node-cache in file that can take around 30GB of
+space.
+
 License & Credits
 -----------------
 
