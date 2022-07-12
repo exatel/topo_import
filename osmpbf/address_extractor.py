@@ -100,6 +100,7 @@ class Area:
     level: int
     geo: object
     centroid: shapely.geometry.Point
+    postcode: str
 
 
 @dataclass
@@ -119,6 +120,19 @@ class Place:
 
     # City was set from the administrative area.
     city_from_area: bool = False
+    postcode_from_area: bool = False
+
+
+@dataclass
+class PostalPlace:
+    """
+    The most interesting information about places with postcode. These are places in
+    the understanding of OSM - https://wiki.openstreetmap.org/wiki/Places
+    """
+    name: str
+    is_in: str
+    postcode: str
+    geo: object
 
 
 class AddressExtractor(osmium.SimpleHandler):
@@ -142,6 +156,11 @@ class AddressExtractor(osmium.SimpleHandler):
 
         self.start = time.time()
 
+        # dictionary simc:postcode created from postal places
+        self.postal_simcs = {}
+        # list of places
+        self.postal_places = []
+
         # Factory that creates WKT from an osmium geometry
         self.wktfab = osmium.geom.WKTFactory()
 
@@ -154,7 +173,8 @@ class AddressExtractor(osmium.SimpleHandler):
         """Save places to CSV file."""
         fields = [
             'pid', 'name', 'city', 'postcode', 'street', 'housenumber',
-            'simc', 'amenity', 'lon', 'lat', 'street_distance', 'city_from_area'
+            'simc', 'amenity', 'lon', 'lat', 'street_distance', 'city_from_area',
+            'postcode_from_area'
         ]
         start = time.time()
         with open(filename, "w") as csvf:
@@ -165,7 +185,8 @@ class AddressExtractor(osmium.SimpleHandler):
                     place.pid, place.name, place.addr.city, place.addr.postcode,
                     place.addr.street, place.addr.housenumber, place.addr.city_simc,
                     place.amenity, place.geo.coords[0][0], place.geo.coords[0][1],
-                    place.street_distance, "1" if place.city_from_area else "0"
+                    place.street_distance, "1" if place.city_from_area else "0",
+                    "1" if place.postcode_from_area else "0"
                 ]
                 writer.writerow(data)
                 if idx % 100000 == 0:
@@ -220,6 +241,16 @@ class AddressExtractor(osmium.SimpleHandler):
             print(f"Reading nodes {dict(self.stats)} in {took:.1f}s, {per_s:.1f}/s")
 
         tags = node.tags
+
+        if tags.get("postal_code"):
+            geo = shapely.geometry.Point(node.location.lon, node.location.lat)
+            if simc := tags.get("simc"):
+                self.postal_simcs[simc] = tags.get("postal_code")
+
+            postal_place = PostalPlace(tags.get("name", ""), tags.get("is_in", ""),
+                                       tags.get("postal_code"), geo)
+            self.postal_places.append(postal_place)
+
         if b'addr:housenumber' not in tags:
             # TODO: What if other addr: are available?
             self.stats['node_no_housenumber'] += 1
@@ -243,6 +274,21 @@ class AddressExtractor(osmium.SimpleHandler):
         if not place.addr.street:
             self.address_idx.insert(idx, place.geo.coords[0])
             self.stats['no_street_idx'] += 1
+
+    def get_postcode(self, simc, name, geo):
+        "Try to get postcode for area using postal_places"
+        # try to get postcode from simc
+        if simc and (postcode := self.postal_simcs.get(simc, "")):
+            return postcode
+
+        # try to get postcode from name and coords
+        postcode_geo = ""
+        for place in self.postal_places:
+            if (name and name == place.name or name in place.is_in and geo.contains(place.geo)):
+                return place.postcode
+            if geo.contains(place.geo):
+                postcode_geo = place.postcode
+        return postcode_geo
 
     def area(self, area):
         """Parse areas (administrative boundaries)."""
@@ -289,10 +335,6 @@ class AddressExtractor(osmium.SimpleHandler):
         terc = tags.get('teryt:terc', None)
         # wieś, przysiółek
         terc_type = tags.get('terc:typ', '')
-        if simc:
-            simc = int(simc)
-        if terc:
-            terc = int(terc)
 
         # Cities usually have population.
         has_population = 'population' in tags
@@ -305,13 +347,15 @@ class AddressExtractor(osmium.SimpleHandler):
             self.stats['areas_powiat'] += 1
 
         quality = 0
-        if terc_type or simc:
+        if terc or terc_type or simc:
             quality += 3
         if has_population:
             quality += 1
 
         # print(f"{admin_level:2}, TT:{terc_type:5s} RT:{reltype:10s} "
         #       f"N:{name:20s} T:{terc} S:{simc}")
+
+        postcode = self.get_postcode(simc, name, geo)
 
         self.areas.append(Area(
             aid=f'a{area.id}',
@@ -320,6 +364,7 @@ class AddressExtractor(osmium.SimpleHandler):
             level=admin_level,
             geo=geo,
             centroid=centroid,
+            postcode=postcode,
         ))
 
     def tags_to_address(self, tags):
@@ -358,7 +403,7 @@ class AddressExtractor(osmium.SimpleHandler):
         """
         Match cities (areas) to places (ways/nodes).
 
-        Create a list of points without cities (unmatched)
+        Create a list of points without cities and postcodes (unmatched)
         Create index for area.
         Go throught all unmatched points and try to match closest area.
 
@@ -380,29 +425,37 @@ class AddressExtractor(osmium.SimpleHandler):
         for i, area in enumerate(self.areas):
             ridx.insert(i, area.geo.bounds)
 
-        unmatched = [place for place in self.places if not place.addr.city]
+        unmatched_cities = [place for place in self.places if not place.addr.city]
+        unmatched_postcodes = [place for place in self.places if not place.addr.postcode]
 
-        start = time.time()
+        def fill_unmatched(unmatched: list, field_type: str):
+            start = time.time()
+            for pos, place in enumerate(unmatched):
+                parents = [
+                    self.areas[idx]
+                    for idx in ridx.intersection(place.geo.coords[0])
+                ]
 
-        for pos, place in enumerate(unmatched):
-            parents = [
-                self.areas[idx]
-                for idx in ridx.intersection(place.geo.coords[0])
-            ]
+                # From highest level (7) to lowest (9)
+                parents.sort(key=lambda ar: ar.level, reverse=False)
 
-            # From highest level (7) to lowest (9)
-            parents.sort(key=lambda ar: ar.level, reverse=False)
+                if pos % 5000 == 0:
+                    took = time.time() - start
+                    print(f"Matching to {field_type} {pos}/{len(unmatched)} in "
+                          f"{took:.1f} {pos/took:.1f}/s {dict(self.stats)}")
 
-            if pos % 5000 == 0:
-                took = time.time() - start
-                print(f"Matching to cities {pos}/{len(unmatched)} in "
-                      f"{took:.1f} {pos/took:.1f}/s {dict(self.stats)}")
+                for parent in parents:
+                    # Additional check, as bounding boxes are not perfect
+                    if not parent.geo.contains(place.geo):
+                        self.stats['bounding_box_but_no_match'] += 1
+                        continue
 
-            for parent in parents:
-                # Additional check, as bounding boxes are not perfect
-                if parent.geo.contains(place.geo):
-                    place.addr.city = parent.name
-                    place.city_from_area = True
+                    if field_type == "cities":
+                        place.addr.city = parent.name
+                        place.city_from_area = True
+                    elif field_type == "postcodes" and parent.postcode:
+                        place.addr.postcode = parent.postcode
+                        place.postcode_from_area = True
 
                     distance = place.geo.distance(parent.centroid)
                     self.stats['max_area_distance'] = max(distance,
@@ -412,14 +465,15 @@ class AddressExtractor(osmium.SimpleHandler):
                         # Those are usually cities. Those should override the 9 level.
                         # TODO: What if multiple 8 levels match?
                         break
-                else:
-                    self.stats['bounding_box_but_no_match'] += 1
 
-            if not parents:
-                self.stats['place_without_region'] += 1
-                continue
+                if not parents:
+                    self.stats['place_without_region'] += 1
+                    continue
 
-        self.took = time.time() - self.start
+            self.took = time.time() - self.start
+
+        fill_unmatched(unmatched_cities, "cities")
+        fill_unmatched(unmatched_postcodes, "postcodes")
         return
 
 
