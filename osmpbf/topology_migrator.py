@@ -53,6 +53,9 @@ class WayMapping(enum.Enum):
     # Unknown classification
     road = 1100
 
+    # used mainly/exclusively by pedestrians
+    pedestrian = 1200
+
     # To be removed probably.
     # path = 2000
     # cycleway = 2100
@@ -75,7 +78,7 @@ class TopologyMigrator:
 
     To calculate length I need lat/lon of... ALL POINTS - not only intersections.
     """
-    CHUNK_SIZE=5000
+    CHUNK_SIZE = 5000
 
     def __init__(self, conn, max_meters=None):
         self.conn = conn
@@ -229,7 +232,7 @@ class TopologyMigrator:
                 # Split at this point
                 cur_way.append(node_id)
                 split_ways.append(cur_way)
-                cur_way=[node_id]
+                cur_way = [node_id]
             else:
                 # Just aggregate - no intersection here.
                 cur_way.append(node_id)
