@@ -161,7 +161,7 @@ class TopologyMigrator:
         if highway is None:
             return True
 
-        highway = highway.decode('ascii')
+        highway = highway.decode('utf-8')
         try:
             _ = WayMapping[highway]
             return False
