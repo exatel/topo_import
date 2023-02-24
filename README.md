@@ -54,8 +54,9 @@ Address exporter
 Address exporter exports address data from OSM PBF file using pyosmium library.
 
 Example call:
-./topo_import.py --address-import --pbf ~/poland-latest.osm.pbf --cache-mem
-extractor.save_to_csv("output.csv")
+`./topo_import.py --address-import --pbf ~/poland-latest.osm.pbf --cache-mem`
+once exported, the IPython embed console will show and can store the data with:
+`extractor.save_to_csv("output.csv")`
 
 With `--cache-mem` will require around 12GB of free RAM to extract from Poland.
 Without this option uses a node-cache in file that can take around 30GB of
