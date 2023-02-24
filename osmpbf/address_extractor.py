@@ -104,6 +104,18 @@ class Area:
 
 
 @dataclass
+class Relation:
+    """Relation that stores the Way representative,
+    that will later be converted to a Place with geo information from its way.
+    """
+    rid: str
+    name: str
+    addr: Address
+    amenity: Optional[str]
+    way_ref: str
+
+
+@dataclass
 class Place:
     """Addressed place, from way or from a node."""
     pid: str
@@ -145,16 +157,18 @@ class AddressExtractor(osmium.SimpleHandler):
         # Nodes that had an address
         self.places: list[Place] = []
 
+        # Relations that have an address but do not yet have geo information, because
+        # it is in members' data.
+        self.relations: list[Relation] = []
+
         # Many nodes don't fancy a street. Index them so we can match streets as we read them
         # We CAN'T sort places while this index is in use.
         self.address_idx = rtree.Index(interleaved=True)
 
-        # Administrative areas by ID
-        self.areas: Area = []
+        # Administrative areas and/or areas with multipolygon
+        self.areas: list[Area] = []
 
         self.stats = defaultdict(lambda: 0)
-
-        self.start = time.time()
 
         # dictionary simc:postcode created from postal places
         self.postal_simcs = {}
@@ -165,6 +179,7 @@ class AddressExtractor(osmium.SimpleHandler):
         self.wktfab = osmium.geom.WKTFactory()
 
         self.start = time.time()
+        self.start_inner = time.time()
         self.took = None
 
         super().__init__()
@@ -199,7 +214,9 @@ class AddressExtractor(osmium.SimpleHandler):
         self.stats['ways'] += 1
 
         if self.stats['ways'] % 10000 == 0:
-            print("Reading ways", dict(self.stats), time.time() - self.start)
+            took = time.time() - self.start_inner
+            per_s = self.stats['ways'] / took
+            print(f"Reading ways {dict(self.stats)} in {took:.1f}s, {per_s:.1f}/s")
 
         # TODO: We can export all the STREETS to the elasticsearch with full geo.
         # And then use it to find street nearest to the building.
@@ -236,7 +253,7 @@ class AddressExtractor(osmium.SimpleHandler):
         self.stats['nodes'] += 1
 
         if self.stats['nodes'] % 1000000 == 0:
-            took = time.time() - self.start
+            took = time.time() - self.start_inner
             per_s = self.stats['nodes'] / took
             print(f"Reading nodes {dict(self.stats)} in {took:.1f}s, {per_s:.1f}/s")
 
@@ -291,12 +308,41 @@ class AddressExtractor(osmium.SimpleHandler):
         return postcode_geo
 
     def area(self, area):
-        """Parse areas (administrative boundaries)."""
+        """Parse areas (administrative boundaries) or
+        areas which represents relations (schools, office building, etc.).
+        """
         self.stats['areas'] += 1
         tags = area.tags
 
         if self.stats['areas'] % 50000 == 0:
-            print("Reading areas", dict(self.stats), time.time() - self.start)
+            took = time.time() - self.start_inner
+            per_s = self.stats['areas'] / took
+            print(f"Reading areas {dict(self.stats)} in {took:.1f}s, {per_s:.1f}/s")
+
+        if not area.from_way() and 'building' in tags and 'addr:housenumber' in tags:
+            # Area which is not from way means it is Relation with type of multipolygon.
+            self.stats['areas_as_relation'] += 1
+
+            try:
+                wkt = self.wktfab.create_multipolygon(area)
+            except RuntimeError:
+                print("Problem with reading multipolygon from area, ignoring", area)
+                self.stats['areas_as_relation_with_runtime_error'] += 1
+                return
+            geo = shapely.wkt.loads(wkt)
+            address = self.tags_to_address(tags)
+            relation_id = area.orig_id()
+
+            place = Place(
+                pid=f'r{relation_id}',
+                name=tags.get('name', ''),
+                amenity=tags.get('amenity', ''),
+                addr=address,
+                geo=geo.centroid,
+                street_distance=360,
+            )
+            self.index_address(place)
+            return
 
         boundary = tags.get('boundary', None)
         if boundary is None:
@@ -366,6 +412,58 @@ class AddressExtractor(osmium.SimpleHandler):
             centroid=centroid,
             postcode=postcode,
         ))
+
+    def relation(self, relation):
+        """Reads relations which have any building information and has different type than
+        'multipolygon', saves its member representative from which later can read the geometry.
+        Relations that have type 'multipolygon' are covered in the Area section.
+        """
+        tags = relation.tags
+        self.stats['relations'] += 1
+
+        if self.stats['relations'] % 50000 == 0:
+            took = time.time() - self.start_inner
+            per_s = self.stats['relations'] / took
+            print(f"Reading relations {dict(self.stats)} in {took:.1f}s, {per_s:.1f}/s")
+
+        if tags.get('type') == 'multipolygon':
+            # Multipolygon are covered in the Area()
+            self.stats['relation_wrong_type'] += 1
+            return
+        if 'building' not in tags:
+            self.stats['relation_not_building'] += 1
+            return
+        if 'addr:housenumber' not in tags:
+            self.stats['relation_no_housenumber'] += 1
+            return
+
+        # Take only way's (w) members and skip relations - cannot go recursively with the next
+        # relation type. In most cases Ways describes the Relations.
+        members = [member for member in relation.members if member.type == "w"]
+        if not members:
+            self.stats['relation_without_way_members'] += 1
+            return
+
+        # Sort the roles in this order: outline, outer, inner, part, etc.
+        # So that if there is an outline, it perfectly describes the geo info of the relation
+        # Elements without 'role' should be sorted as last one - last character in utf-8 is 255
+        alphabet = {"o": 0, "i": 1, "p": 2}
+        members = sorted(
+            members,
+            key=lambda member:
+                alphabet.get(member.role[0], ord(member.role[0])) if member.role else 256
+        )
+        way = members[0].ref
+
+        address = self.tags_to_address(tags)
+        element = Relation(
+            rid=f'r{relation.id}',
+            name=tags.get('name', ''),
+            addr=address,
+            amenity=tags.get('amenity', ''),
+            way_ref=way
+        )
+        self.relations.append(element)
 
     def tags_to_address(self, tags):
         """Convert OSM tags to address handling nulls."""
@@ -475,6 +573,54 @@ class AddressExtractor(osmium.SimpleHandler):
         fill_unmatched(unmatched_cities, "cities")
         fill_unmatched(unmatched_postcodes, "postcodes")
         return
+
+
+class GeometryMatcher(osmium.SimpleHandler):
+    """Match the relations within any of the geometry from its members and save it as Place."""
+
+    def __init__(self, extractor):
+        self.extractor = extractor
+        self.start = time.time()
+        self.stats = defaultdict(lambda: 0)
+        self.wktfab = osmium.geom.WKTFactory()
+
+        self.stats["relations"] = len(extractor.relations)
+        self.way_ref_to_relation = {
+            relation.way_ref: relation for relation in self.extractor.relations
+        }
+        super().__init__()
+
+    def way(self, way):
+        """Try to find the best geometry for relations objects and save it as place."""
+        self.stats['ways'] += 1
+
+        if self.stats['ways'] % 100000 == 0:
+            took = time.time() - self.start
+            print(f"GeometryMatcher reading ways in "
+                  f"{took:.1f}s {self.stats['ways'] / took:.1f}/s")
+            print("  ", dict(self.stats))
+
+        if way.id not in self.way_ref_to_relation:
+            return
+
+        try:
+            wkt = self.wktfab.create_linestring(way)
+            geo = shapely.wkt.loads(wkt)
+        except osmium._osmium.InvalidLocationError:
+            self.stats['relations_ways_with_invalid_location'] += 1
+            return
+
+        relation = self.way_ref_to_relation[way.id]
+        place = Place(
+            pid=relation.rid,
+            name=relation.name,
+            amenity=relation.amenity,
+            addr=relation.addr,
+            geo=geo.centroid,
+            street_distance=360,
+        )
+        self.extractor.index_address(place)
+        self.stats['relations_converted_to_places'] += 1
 
 
 class StreetMatcher(osmium.SimpleHandler):

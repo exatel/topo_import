@@ -5,18 +5,16 @@
 # LICENSE: GPL-3.0-or-later, See COPYING file
 # Author: Tomasz Fortuna
 
-import sys
+import argparse
 import os.path
+import sys
 from time import time
 
-import argparse
 import psycopg2
 import psycopg2.extras
-
-from osmpbf import PBFParser
-from osmpbf import TopologyMigrator
-from osmpbf import AddressExtractor, StreetMatcher
 from IPython import embed
+
+from osmpbf import AddressExtractor, GeometryMatcher, PBFParser, StreetMatcher, TopologyMigrator
 
 
 def parse_args():
@@ -78,7 +76,6 @@ def connect(args):
 def address_import(args):
     """Import address geolocalization data."""
     extractor = AddressExtractor()
-    start = time()
 
     if args.cache_mem:
         idx = 'flex_mem'
@@ -86,22 +83,32 @@ def address_import(args):
         idx = 'sparse_file_array,node-cache.data'
 
     try:
+        extractor.start_inner = time()
         extractor.apply_file(args.pbf, locations=True, idx=idx)
-        took = time() - start
+        took = time() - extractor.start_inner
         print(f"Aggregating places took {took:.1f} seconds")
         print(f"Final stats {dict(extractor.stats)}")
 
-        start = time()
+        extractor.start_inner = time()
+        matcher = GeometryMatcher(extractor)
+        print("Starting Relations geometry matcher")
+        matcher.apply_file(args.pbf, locations=True, idx=idx)
+        took = time() - extractor.start_inner
+        print(f"Matching Relations geometry took {took:.1f} seconds")
+        print(f"Matcher stats {dict(matcher.stats)}")
+
+        extractor.start_inner = time()
         matcher = StreetMatcher(extractor)
         print("Starting street matcher")
         matcher.apply_file(args.pbf, locations=True, idx=idx)
-        took = time() - start
+        took = time() - extractor.start_inner
         print(f"Matching streets took {took:.1f} seconds")
         print(f"Matcher stats {dict(matcher.stats)}")
 
-        start = time()
+        extractor.start_inner = time()
+        print("Starting matching cities (areas) to places.")
         extractor.finish()
-        took = time() - start
+        took = time() - extractor.start_inner
         print(f"Matching addresses to administrative boundaries took {took:.1f} seconds")
         print(f"Total extract time is {extractor.took:.1f}s")
     except KeyboardInterrupt:
