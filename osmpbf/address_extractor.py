@@ -466,7 +466,12 @@ class AddressExtractor(osmium.SimpleHandler):
         self.relations.append(element)
 
     def tags_to_address(self, tags):
-        """Convert OSM tags to address handling nulls."""
+        """Convert OSM tags to address handling nulls.
+
+        In some cases address can have:
+        - no city name, then use place (for cities without street names).
+        - no street name, then use place (for districts without street names).
+        """
         place = tags.get('addr:place', '')
         street = tags.get('addr:street', '')
         city = tags.get('addr:city', '')
@@ -492,7 +497,7 @@ class AddressExtractor(osmium.SimpleHandler):
             housenumber=tags.get('addr:housenumber', ''),
             # Fall back to place, which seems to work sometimes in Poland
             city=city or place,
-            street=street,
+            street=street or place,
             postcode=tags.get('addr:postcode', ''),
             city_simc=tags.get('addr:city:simc', ''),
         )
