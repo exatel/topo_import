@@ -49,7 +49,6 @@ extractor.stats:
  'nodes': 186336433,
  'place_without_region': 41
  'way_no_housenumber': 11742782,
- 'way_not_building': 9693906,
  'ways': 25851413,
 
 matcher.stats:
@@ -220,9 +219,6 @@ class AddressExtractor(osmium.SimpleHandler):
 
         # TODO: We can export all the STREETS to the elasticsearch with full geo.
         # And then use it to find street nearest to the building.
-        if 'building' not in tags:
-            self.stats['way_not_building'] += 1
-            return
 
         if 'addr:housenumber' not in tags:
             self.stats['way_no_housenumber'] += 1
@@ -268,7 +264,7 @@ class AddressExtractor(osmium.SimpleHandler):
                                        tags.get("postal_code"), geo)
             self.postal_places.append(postal_place)
 
-        if b'addr:housenumber' not in tags:
+        if 'addr:housenumber' not in tags:
             # TODO: What if other addr: are available?
             self.stats['node_no_housenumber'] += 1
             return
@@ -319,7 +315,7 @@ class AddressExtractor(osmium.SimpleHandler):
             per_s = self.stats['areas'] / took
             print(f"Reading areas {dict(self.stats)} in {took:.1f}s, {per_s:.1f}/s")
 
-        if not area.from_way() and 'building' in tags and 'addr:housenumber' in tags:
+        if not area.from_way() and 'addr:housenumber' in tags:
             # Area which is not from way means it is Relation with type of multipolygon.
             self.stats['areas_as_relation'] += 1
 
@@ -429,9 +425,6 @@ class AddressExtractor(osmium.SimpleHandler):
         if tags.get('type') == 'multipolygon':
             # Multipolygon are covered in the Area()
             self.stats['relation_wrong_type'] += 1
-            return
-        if 'building' not in tags:
-            self.stats['relation_not_building'] += 1
             return
         if 'addr:housenumber' not in tags:
             self.stats['relation_no_housenumber'] += 1
