@@ -46,6 +46,12 @@ def parse_args():
                    type=int,
                    help="split ways exceeding X meters")
 
+    p.add_argument("--output-path", nargs="?", default=None, type=str, const="output.csv",
+                   help="Use with address import."
+                        "The path for the csv file where the output from the address importer"
+                        "should be written."
+                        "If not specified, an ipython embed will open at the end.")
+
     args = p.parse_args()
 
     if args.topo_import == args.address_import:
@@ -115,6 +121,10 @@ def address_import(args):
         print("Starting shell after interrupt")
         print(dict(extractor.stats))
 
+    if args.output_path:
+        extractor.save_to_csv(args.output_path)
+        sys.exit(0)
+
     # Allow manipulation of loaded data before quitting.
     embed()
 
@@ -176,6 +186,7 @@ def main():
         topo_import(args)
     if args.address_import:
         address_import(args)
+
 
 if __name__ == '__main__':
     main()
